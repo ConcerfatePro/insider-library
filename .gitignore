@@ -1,0 +1,22 @@
+# Environment variables
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+
+# SQLite database
+*.db
+
+# Uploaded files
+uploads/
+
+# Node
+node_modules/
+
+# Build output
+dist/
+build/
