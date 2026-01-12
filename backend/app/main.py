@@ -1,5 +1,9 @@
 # backend/app/main.py
 import os
+
+from dotenv import load_dotenv
+load_dotenv()  # ✅ must be before importing modules that read env vars
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 

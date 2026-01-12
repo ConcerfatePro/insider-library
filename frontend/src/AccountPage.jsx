@@ -1,8 +1,10 @@
-import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { getMe, signup, verifySignup, login } from "./api";
+import React, { useEffect, useMemo, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
+import { API_BASE, getMe, signup, verifySignup, login } from "./api";
 
 function AccountPage() {
+  const location = useLocation();
+
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -17,10 +19,45 @@ function AccountPage() {
   const [signupCode, setSignupCode] = useState("");
   const [pendingEmail, setPendingEmail] = useState("");
 
+  // resend state
+  const RESEND_SECONDS = 30;
+  const [resendRemaining, setResendRemaining] = useState(0);
+  const [resending, setResending] = useState(false);
+
   // login state
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
 
+  // password reset UI state
+  const [resetStep, setResetStep] = useState("off"); // "off" | "request" | "reset"
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetToken, setResetToken] = useState("");
+  const [resetNewPassword, setResetNewPassword] = useState("");
+  const [resetting, setResetting] = useState(false);
+
+  // ---------- helpers ----------
+  async function jsonFetch(path, { method = "GET", body } = {}) {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+
+    const data = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      const msg =
+        data?.detail ||
+        data?.message ||
+        `Request failed (${res.status})`;
+      const err = new Error(String(msg));
+      err.status = res.status;
+      throw err;
+    }
+    return data;
+  }
+
+  // ---------- load user ----------
   useEffect(() => {
     const load = async () => {
       setLoading(true);
@@ -39,14 +76,36 @@ function AccountPage() {
     load();
   }, []);
 
+  // ---------- if reset token is in URL, open reset panel ----------
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const t = params.get("resetToken");
+    if (t && !currentUser) {
+      setResetToken(t);
+      setResetStep("reset");
+      setSuccess("Paste a new password to reset your account.");
+    }
+  }, [location.search, currentUser]);
+
   const handleLogout = () => {
     localStorage.removeItem("token");
     setCurrentUser(null);
     setSuccess("You’ve been logged out.");
   };
 
-  // ---------- signup + verify ----------
+  // ---------- resend countdown timer ----------
+  useEffect(() => {
+    if (signupStep !== "verify") return;
+    if (resendRemaining <= 0) return;
 
+    const t = window.setInterval(() => {
+      setResendRemaining((s) => Math.max(0, s - 1));
+    }, 1000);
+
+    return () => window.clearInterval(t);
+  }, [signupStep, resendRemaining]);
+
+  // ---------- signup + verify ----------
   const handleSignupSubmit = async (e) => {
     e.preventDefault();
     setError("");
@@ -58,14 +117,15 @@ function AccountPage() {
         email: signupEmail,
         password: signupPassword,
       });
+
       setPendingEmail(signupEmail);
       setSignupStep("verify");
-      setSuccess(
-        "Sign up successful. A 6-digit code has been sent to your email (in dev, check backend console)."
-      );
+      setResendRemaining(RESEND_SECONDS);
+
+      setSuccess("Sign up successful. A 6-digit code has been sent to your email.");
     } catch (err) {
       console.error(err);
-      setError("Failed to sign up. Please check your details and try again.");
+      setError(err?.message || "Failed to sign up. Please check your details and try again.");
     }
   };
 
@@ -91,16 +151,42 @@ function AccountPage() {
       setSignupPassword("");
       setSignupCode("");
       setPendingEmail("");
+      setResendRemaining(0);
+      setResending(false);
 
       setSuccess("Your email has been verified and you’re now signed in.");
     } catch (err) {
       console.error(err);
-      setError("Failed to verify code. Please double-check and try again.");
+      setError(err?.message || "Failed to verify code. Please double-check and try again.");
+    }
+  };
+
+  const handleResendCode = async () => {
+    if (!pendingEmail) return;
+
+    setError("");
+    setSuccess("");
+
+    try {
+      setResending(true);
+
+      await signup({
+        name: signupName,
+        email: pendingEmail,
+        password: signupPassword,
+      });
+
+      setSuccess("Verification code re-sent. Please check your email.");
+      setResendRemaining(RESEND_SECONDS);
+    } catch (err) {
+      console.error(err);
+      setError(err?.message || "Could not resend the code yet. Please wait and try again.");
+    } finally {
+      setResending(false);
     }
   };
 
   // ---------- login ----------
-
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
     setError("");
@@ -120,12 +206,62 @@ function AccountPage() {
       setSuccess("Logged in successfully.");
     } catch (err) {
       console.error(err);
-      setError("Failed to log in. Check your email/password and try again.");
+      setError(err?.message || "Failed to log in. Check your email/password and try again.");
     }
   };
 
-  // ---------- render ----------
+  // ---------- password reset ----------
+  const handleRequestReset = async (e) => {
+    e.preventDefault();
+    setError("");
+    setSuccess("");
 
+    try {
+      await jsonFetch("/auth/request-password-reset", {
+        method: "POST",
+        body: { email: resetEmail },
+      });
+
+      setResetStep("reset");
+      setSuccess("If an account exists for that email, a reset link has been sent.");
+    } catch (err) {
+      console.error(err);
+      setError(err?.message || "Failed to request password reset.");
+    }
+  };
+
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    setError("");
+    setSuccess("");
+
+    try {
+      setResetting(true);
+      await jsonFetch("/auth/reset-password", {
+        method: "POST",
+        body: { token: resetToken, new_password: resetNewPassword },
+      });
+
+      setSuccess("Password updated. You can now log in.");
+      setResetToken("");
+      setResetNewPassword("");
+      setResetEmail("");
+      setResetStep("off");
+    } catch (err) {
+      console.error(err);
+      setError(err?.message || "Failed to reset password.");
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  const resendLabel = useMemo(() => {
+    if (resending) return "Resending…";
+    if (resendRemaining > 0) return `Resend in ${resendRemaining}s`;
+    return "Resend code";
+  }, [resending, resendRemaining]);
+
+  // ---------- render ----------
   return (
     <div className="page-root">
       <div className="page-main">
@@ -155,16 +291,14 @@ function AccountPage() {
               <div className="home-section-label">Account</div>
               <h2 className="section-title">Your Insider Library account</h2>
               <p className="home-hero-subtitle">
-                This is your identity inside the library. Your name and email
-                help buyers know who created each info pack.
+                This is your identity inside the library. Your name and email help
+                buyers know who created each info pack.
               </p>
 
               <div className="account-info-grid">
                 <div className="account-info-row">
                   <div className="account-label">Name</div>
-                  <div className="account-value">
-                    {currentUser.name || "—"}
-                  </div>
+                  <div className="account-value">{currentUser.name || "—"}</div>
                 </div>
                 <div className="account-info-row">
                   <div className="account-label">Email</div>
@@ -199,31 +333,10 @@ function AccountPage() {
               <h3 className="section-title">Security & session</h3>
               <p className="home-hero-subtitle">
                 You signed up with email-based verification (6-digit code).
-                In future updates, you&apos;ll be able to change your profile
-                details and password from here.
               </p>
 
-              <ul className="upload-guidelines">
-                <li>
-                  Keep your account email secure; it&apos;s used for login and
-                  verification codes.
-                </li>
-                <li>
-                  Don&apos;t share your account with others—listings are tied to
-                  your identity.
-                </li>
-                <li>
-                  If you ever suspect suspicious activity, change your password
-                  and contact the Insider Library admin
-                </li>
-              </ul>
-
               <div className="home-hero-actions" style={{ marginTop: "1.1rem" }}>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={handleLogout}
-                >
+                <button type="button" className="btn btn-ghost" onClick={handleLogout}>
                   Log out
                 </button>
               </div>
@@ -237,8 +350,7 @@ function AccountPage() {
               <div className="home-section-label">Log in</div>
               <h2 className="section-title">Welcome back</h2>
               <p className="home-hero-subtitle">
-                Sign in to access your dashboard, manage uploads, and track
-                your listings.
+                Sign in to access your dashboard, manage uploads, and track your listings.
               </p>
 
               <form onSubmit={handleLoginSubmit}>
@@ -268,8 +380,116 @@ function AccountPage() {
                       Log in
                     </button>
                   </div>
+
+                  <div className="form-field" style={{ gridColumn: "1 / -1" }}>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => {
+                        setResetStep((s) => (s === "off" ? "request" : "off"));
+                        setError("");
+                        setSuccess("");
+                      }}
+                      style={{ width: "100%" }}
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
                 </div>
               </form>
+
+              {resetStep !== "off" && (
+                <div
+                  style={{
+                    marginTop: "0.9rem",
+                    padding: "0.85rem",
+                    borderRadius: "12px",
+                    border: "1px solid #22354b",
+                    background: "radial-gradient(circle at top left, #142335 0%, #070f1c 70%)",
+                  }}
+                >
+                  {resetStep === "request" ? (
+                    <form onSubmit={handleRequestReset}>
+                      <div className="metric-label" style={{ marginBottom: "0.35rem" }}>
+                        Reset password
+                      </div>
+                      <div className="form-grid">
+                        <div className="form-field" style={{ gridColumn: "1 / -1" }}>
+                          <label className="form-label">Email</label>
+                          <input
+                            className="input"
+                            type="email"
+                            value={resetEmail}
+                            onChange={(e) => setResetEmail(e.target.value)}
+                            required
+                            placeholder="you@example.com"
+                          />
+                        </div>
+                        <div className="form-field" style={{ alignSelf: "flex-end" }}>
+                          <button type="submit" className="btn btn-primary">
+                            Send reset email
+                          </button>
+                        </div>
+                        <div className="form-field" style={{ alignSelf: "flex-end" }}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            onClick={() => setResetStep("off")}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    </form>
+                  ) : (
+                    <form onSubmit={handleResetPassword}>
+                      <div className="metric-label" style={{ marginBottom: "0.35rem" }}>
+                        Enter reset token + new password
+                      </div>
+                      <div className="form-grid">
+                        <div className="form-field" style={{ gridColumn: "1 / -1" }}>
+                          <label className="form-label">Reset token</label>
+                          <input
+                            className="input"
+                            type="text"
+                            value={resetToken}
+                            onChange={(e) => setResetToken(e.target.value)}
+                            required
+                            placeholder="Paste token from your email"
+                          />
+                        </div>
+                        <div className="form-field" style={{ gridColumn: "1 / -1" }}>
+                          <label className="form-label">New password</label>
+                          <input
+                            className="input"
+                            type="password"
+                            value={resetNewPassword}
+                            onChange={(e) => setResetNewPassword(e.target.value)}
+                            required
+                            placeholder="At least 8 characters"
+                          />
+                        </div>
+
+                        <div className="form-field" style={{ alignSelf: "flex-end" }}>
+                          <button type="submit" className="btn btn-primary" disabled={resetting}>
+                            {resetting ? "Resetting…" : "Reset password"}
+                          </button>
+                        </div>
+                        <div className="form-field" style={{ alignSelf: "flex-end" }}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            onClick={() => setResetStep("request")}
+                            disabled={resetting}
+                          >
+                            Back
+                          </button>
+                        </div>
+                      </div>
+                    </form>
+                  )}
+                </div>
+              )}
             </section>
 
             {/* Signup / verify card */}
@@ -277,8 +497,7 @@ function AccountPage() {
               <div className="home-section-label">Sign up</div>
               <h2 className="section-title">Create an account</h2>
               <p className="home-hero-subtitle">
-                New here? Create an Insider Library account to publish info
-                packs and leave reviews.
+                New here? Create an Insider Library account to publish info packs and leave reviews.
               </p>
 
               {signupStep === "form" ? (
@@ -324,10 +543,9 @@ function AccountPage() {
               ) : (
                 <form onSubmit={handleVerifyCode}>
                   <p className="home-hero-subtitle" style={{ marginBottom: "0.8rem" }}>
-                    Enter the 6-digit code sent to{" "}
-                    <strong>{pendingEmail}</strong>.  
-                    (In dev, the code is logged in the backend console.)
+                    Enter the 6-digit code sent to <strong>{pendingEmail}</strong>.
                   </p>
+
                   <div className="form-grid">
                     <div className="form-field">
                       <label className="form-label">Verification code</label>
@@ -340,9 +558,41 @@ function AccountPage() {
                         maxLength={6}
                       />
                     </div>
+
                     <div className="form-field" style={{ alignSelf: "flex-end" }}>
                       <button type="submit" className="btn btn-primary">
                         Verify
+                      </button>
+                    </div>
+
+                    <div className="form-field" style={{ gridColumn: "1 / -1" }}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        onClick={handleResendCode}
+                        disabled={resending || resendRemaining > 0}
+                        style={{ width: "100%" }}
+                      >
+                        {resendLabel}
+                      </button>
+                    </div>
+
+                    <div className="form-field" style={{ gridColumn: "1 / -1" }}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        onClick={() => {
+                          setSignupStep("form");
+                          setSignupCode("");
+                          setPendingEmail("");
+                          setResendRemaining(0);
+                          setResending(false);
+                          setError("");
+                          setSuccess("");
+                        }}
+                        style={{ width: "100%" }}
+                      >
+                        ← Back to sign up
                       </button>
                     </div>
                   </div>

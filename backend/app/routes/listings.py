@@ -1,5 +1,6 @@
 # backend/app/routes/listings.py
 import os
+import re
 from pathlib import Path
 from typing import List
 
@@ -18,6 +19,16 @@ MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "25"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 
 router = APIRouter(prefix="/listings", tags=["listings"])
+
+
+def _safe_filename(title: str, listing_id: int) -> str:
+  base = (title or "").strip()
+  if not base:
+    return f"listing_{listing_id}.pdf"
+  # keep it simple/safe for headers and filesystem
+  base = re.sub(r"[^a-zA-Z0-9 _-]+", "", base).strip()
+  base = re.sub(r"\s+", "_", base)[:80]
+  return f"{base or f'listing_{listing_id}'}.pdf"
 
 
 @router.get("/", response_model=List[schemas.ListingOut])
@@ -146,7 +157,7 @@ async def upload_listing_file(
   return listing
 
 
-# 🔒 REQUIRE LOGIN TO DOWNLOAD
+# 🔒 REQUIRE LOGIN TO DOWNLOAD (FREE OR PAID)
 @router.get("/{listing_id}/download")
 def download_listing_file(
   listing_id: int,
@@ -157,10 +168,26 @@ def download_listing_file(
   if not listing or not listing.file_path:
     raise HTTPException(status_code=404, detail="File not found")
 
-  # If later you add purchases, enforce purchase check here.
-  # For now: logged-in users can download published packs.
-  if listing.file_path is None:
-    raise HTTPException(status_code=404, detail="File not found")
+  price = float(listing.price or 0)
+
+  # ✅ FREE: any logged-in user can download
+  if price == 0:
+    file_path = Path(listing.file_path)
+    if not file_path.exists():
+      raise HTTPException(status_code=404, detail="File missing on server")
+
+    return FileResponse(
+      path=file_path,
+      filename=file_path.name,
+      media_type="application/pdf",
+      headers={"Cache-Control": "no-store"},
+    )
+
+  # ✅ PAID: only owner/admin for now (later add buyer check)
+  if listing.owner_id != current_user.id and not current_user.is_admin:
+    # Later: allow buyers too
+    # if not user_has_purchase(db, current_user.id, listing.id):
+    raise HTTPException(status_code=403, detail="Not allowed to download this paid file")
 
   file_path = Path(listing.file_path)
   if not file_path.exists():
@@ -172,3 +199,4 @@ def download_listing_file(
     media_type="application/pdf",
     headers={"Cache-Control": "no-store"},
   )
+

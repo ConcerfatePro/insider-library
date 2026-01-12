@@ -1,10 +1,14 @@
+// frontend/src/ListingsPage.jsx
 import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+
+
 import {
   fetchListings,
   fetchReviews,
   createReview,
   getMe,
-  downloadListingFile, // ✅ NEW
+  downloadListingFile,
 } from "./api";
 
 const CATEGORY_OPTIONS = [
@@ -20,7 +24,7 @@ const CATEGORY_OPTIONS = [
 
 function ListingsPage() {
   const [currentUser, setCurrentUser] = useState(null);
-
+  const navigate = useNavigate();
   const [listings, setListings] = useState([]);
   const [reviewsMap, setReviewsMap] = useState({});
   const [reviewTextMap, setReviewTextMap] = useState({});
@@ -47,14 +51,14 @@ function ListingsPage() {
         }
 
         const data = await fetchListings();
-        setListings(data);
+        setListings(Array.isArray(data) ? data : []);
 
         // Load reviews for each listing
         const reviewsEntries = await Promise.all(
-          data.map(async (listing) => {
+          (Array.isArray(data) ? data : []).map(async (listing) => {
             try {
               const reviews = await fetchReviews(listing.id);
-              return [listing.id, reviews];
+              return [listing.id, Array.isArray(reviews) ? reviews : []];
             } catch (e) {
               console.error("Failed to load reviews for listing", listing.id, e);
               return [listing.id, []];
@@ -63,9 +67,7 @@ function ListingsPage() {
         );
 
         const map = {};
-        for (const [id, reviews] of reviewsEntries) {
-          map[id] = reviews;
-        }
+        for (const [id, reviews] of reviewsEntries) map[id] = reviews;
         setReviewsMap(map);
       } catch (e) {
         console.error(e);
@@ -112,11 +114,9 @@ function ListingsPage() {
       setReviewRatingMap((prev) => ({ ...prev, [listingId]: "5" }));
     } catch (e) {
       console.error(e);
-      setError("Failed to add review");
+      setError(e?.message || "Failed to add review");
     }
   };
-
-  // ----- derived filters/sort -----
 
   const normalizedSearch = searchTerm.toLowerCase().trim();
 
@@ -131,8 +131,8 @@ function ListingsPage() {
 
     const matchesSearch =
       !normalizedSearch ||
-      listing.title.toLowerCase().includes(normalizedSearch) ||
-      listing.description.toLowerCase().includes(normalizedSearch);
+      (listing.title || "").toLowerCase().includes(normalizedSearch) ||
+      (listing.description || "").toLowerCase().includes(normalizedSearch);
 
     return matchesCategory && matchesSearch;
   });
@@ -164,7 +164,7 @@ function ListingsPage() {
 
   const handleDownload = async (listingId) => {
     if (!currentUser) {
-      alert("Log in to download this file.");
+      alert("Create an account or log in to download.");
       return;
     }
     try {
@@ -174,6 +174,12 @@ function ListingsPage() {
       console.error(e);
       setError(e?.message || "Download failed");
     }
+  };
+
+  const handleBuy = (listing) => {
+    // Placeholder until you add purchases.
+    const priceNum = Number(listing.price || 0);
+    alert(`Buying coming next. Price: $${priceNum.toFixed(2)}`);
   };
 
   return (
@@ -191,7 +197,8 @@ function ListingsPage() {
           <h2 className="section-title">Browse Insider Library listings</h2>
           <p className="home-hero-subtitle">
             Search across user-created info packs. Filter by category, sort by
-            recency or rating, and read what others think before you buy.
+            recency or rating, and read what others think before you download or
+            buy.
           </p>
 
           {listings.length > 0 && (
@@ -250,9 +257,26 @@ function ListingsPage() {
                 const avgRating =
                   reviewCount > 0
                     ? (
-                        reviews.reduce((sum, r) => sum + r.rating, 0) / reviewCount
+                        reviews.reduce((sum, r) => sum + r.rating, 0) /
+                        reviewCount
                       ).toFixed(1)
                     : null;
+
+                const priceNum = Number(listing.price || 0);
+                const isFree = priceNum === 0;
+                const isOwnerOrAdmin =
+                  !!currentUser &&
+                  (currentUser.is_admin || currentUser.id === listing.owner_id);
+
+                // NEW RULES:
+                // - must be logged in to download anything
+                // - free: any logged-in user can download
+                // - paid: only owner/admin can download for now (buyers later)
+                const showDownload =
+                  listing.file_path && currentUser && (isFree || isOwnerOrAdmin);
+
+                const showBuy =
+                  listing.file_path && currentUser && !isFree && !isOwnerOrAdmin;
 
                 return (
                   <li key={listing.id} className="listing-card">
@@ -271,7 +295,8 @@ function ListingsPage() {
                         )}
 
                         <div className="listing-meta">
-                          Category: {listing.category} · Price: {listing.price}
+                          Category: {listing.category} · Price:{" "}
+                          {isFree ? "Free" : `$${priceNum.toFixed(2)}`}
                         </div>
                       </div>
                       <span className="badge">
@@ -297,14 +322,46 @@ function ListingsPage() {
                         </div>
                       </div>
 
-                      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                        {listing.file_path && (
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "0.5rem",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        {!listing.file_path ? null : !currentUser ? (
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            onClick={() => navigate("/account")}
+                            title="Create an account or log in to download."
+                          >
+                            Log in to download
+                          </button>
+                        ) : showDownload ? (
                           <button
                             type="button"
                             className="btn btn-primary"
                             onClick={() => handleDownload(listing.id)}
                           >
-                            {currentUser ? "Download" : "Log in to download"}
+                            {isFree ? "Download (Free)" : "Download"}
+                          </button>
+                        ) : showBuy ? (
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            onClick={() => handleBuy(listing)}
+                          >
+                            Buy (${priceNum.toFixed(2)})
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            disabled
+                            title="Paid pack — only buyers (or the owner/admin) can download. Purchases coming next."
+                          >
+                            Locked
                           </button>
                         )}
                       </div>
@@ -318,8 +375,10 @@ function ListingsPage() {
                         <ul className="review-list">
                           {reviews.map((rev) => (
                             <li key={rev.id} className="review-item">
-                              <span className="review-rating">{rev.rating}/5</span> –{" "}
-                              {rev.text}
+                              <span className="review-rating">
+                                {rev.rating}/5
+                              </span>{" "}
+                              – {rev.text}
                             </li>
                           ))}
                         </ul>

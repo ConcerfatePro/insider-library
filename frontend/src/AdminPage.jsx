@@ -9,6 +9,7 @@ import {
   unblacklistUser,
   adminDeleteListing,
   adminDeleteUser,
+  downloadListingFile, // ✅ add
 } from "./api";
 
 const AdminPage = () => {
@@ -46,10 +47,7 @@ const AdminPage = () => {
     try {
       setLoading(true);
       setError("");
-      const [u, ls] = await Promise.all([
-        getAdminUsers(),
-        getAdminListings(),
-      ]);
+      const [u, ls] = await Promise.all([getAdminUsers(), getAdminListings()]);
       setUsers(u);
       setListings(ls);
     } catch (e) {
@@ -117,6 +115,16 @@ const AdminPage = () => {
     }
   };
 
+  const handleDownload = async (listingId) => {
+    try {
+      setError("");
+      await downloadListingFile(listingId);
+    } catch (e) {
+      console.error(e);
+      setError(e?.message || "Failed to download file");
+    }
+  };
+
   // While checking auth, render nothing (prevents flicker)
   if (!currentUser) {
     return null;
@@ -130,8 +138,7 @@ const AdminPage = () => {
             <div className="page-tag">Internal · Admin</div>
             <h1 className="page-title">Admin control panel</h1>
             <p className="page-subtitle">
-              Manage users, blacklist / unblacklist accounts, and clean up
-              listings.
+              Manage users, blacklist / unblacklist accounts, and clean up listings.
             </p>
           </div>
         </div>
@@ -157,7 +164,14 @@ const AdminPage = () => {
                     </div>
 
                     {!u.is_admin && (
-                      <div style={{ marginTop: "0.4rem", display: "flex", gap: "0.4rem" }}>
+                      <div
+                        style={{
+                          marginTop: "0.4rem",
+                          display: "flex",
+                          gap: "0.4rem",
+                          flexWrap: "wrap",
+                        }}
+                      >
                         {!u.is_blacklisted ? (
                           <button
                             className="btn btn-ghost"
@@ -199,13 +213,30 @@ const AdminPage = () => {
                       {l.category} · {l.file_path ? "PDF" : "No file"}
                     </div>
 
-                    <button
-                      className="btn btn-primary"
-                      style={{ marginTop: "0.4rem" }}
-                      onClick={() => handleDeleteListing(l.id)}
+                    <div
+                      style={{
+                        marginTop: "0.4rem",
+                        display: "flex",
+                        gap: "0.4rem",
+                        flexWrap: "wrap",
+                      }}
                     >
-                      Delete listing
-                    </button>
+                      {l.file_path && (
+                        <button
+                          className="btn btn-ghost"
+                          onClick={() => handleDownload(l.id)}
+                        >
+                          Download PDF
+                        </button>
+                      )}
+
+                      <button
+                        className="btn btn-primary"
+                        onClick={() => handleDeleteListing(l.id)}
+                      >
+                        Delete listing
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>

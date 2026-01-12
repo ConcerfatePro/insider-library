@@ -106,6 +106,7 @@ export async function getMyActivity() {
 
 /**
  * 🔒 Authenticated download: fetches PDF with Authorization header and triggers a browser download.
+ * Uses Content-Disposition filename if provided by backend.
  */
 export async function downloadListingFile(listingId) {
   const res = await fetch(`${API_BASE}/listings/${listingId}/download`, {
@@ -117,18 +118,31 @@ export async function downloadListingFile(listingId) {
     throw new Error(msg);
   }
 
+  // Try to read filename from Content-Disposition
+  let filename = `listing_${listingId}.pdf`;
+  const cd = res.headers.get("content-disposition") || "";
+  const match = cd.match(/filename\*?=(?:UTF-8''|")?([^\";]+)"?/i);
+  if (match && match[1]) {
+    try {
+      filename = decodeURIComponent(match[1]);
+    } catch {
+      filename = match[1];
+    }
+  }
+
   const blob = await res.blob();
   const url = window.URL.createObjectURL(blob);
 
   const a = document.createElement("a");
   a.href = url;
-  a.download = `listing_${listingId}.pdf`;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();
 
   window.URL.revokeObjectURL(url);
 }
+
 
 // ---------------- reviews ----------------
 
