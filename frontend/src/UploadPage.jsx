@@ -13,6 +13,9 @@ const CATEGORY_OPTIONS = [
   "Other",
 ];
 
+// ✅ Feature flag: set to true when you want price to show + be used
+const ENABLE_PRICE = false;
+
 export default function UploadPage() {
   const navigate = useNavigate();
 
@@ -22,7 +25,10 @@ export default function UploadPage() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState(CATEGORY_OPTIONS[0]);
+
+  // If price isn't enabled, keep it at 0
   const [price, setPrice] = useState("0");
+
   const [file, setFile] = useState(null);
 
   const [busy, setBusy] = useState(false);
@@ -55,6 +61,14 @@ export default function UploadPage() {
     setFile(null);
   };
 
+  const listingPayload = () => ({
+    title,
+    description,
+    category,
+    // ✅ When disabled, always send 0
+    price: ENABLE_PRICE ? parseFloat(price) || 0 : 0,
+  });
+
   const createDraft = async () => {
     setError("");
     setSuccess("");
@@ -71,14 +85,12 @@ export default function UploadPage() {
 
     try {
       setBusy(true);
-      const draft = await createListing({
-        title,
-        description,
-        category,
-        price: parseFloat(price) || 0,
-      });
+      const draft = await createListing(listingPayload());
+
       resetForm();
-      setSuccess(`Draft created (Listing #${draft.id}). You can attach a PDF later from your dashboard.`);
+      setSuccess(
+        `Draft created (Listing #${draft.id}). You can attach a PDF later from your dashboard.`
+      );
       // optional: jump to dashboard
       // navigate("/dashboard");
     } catch (e) {
@@ -108,12 +120,7 @@ export default function UploadPage() {
       setBusy(true);
 
       // 1) Create listing metadata
-      const newListing = await createListing({
-        title,
-        description,
-        category,
-        price: parseFloat(price) || 0,
-      });
+      const newListing = await createListing(listingPayload());
 
       // 2) Upload the PDF to that listing
       const listingWithFile = await uploadListingFile(newListing.id, file);
@@ -263,17 +270,21 @@ export default function UploadPage() {
                     />
                   </div>
 
-                  <div className="form-field">
-                    <label className="form-label">Price (not used yet)</label>
-                    <input
-                      className="input"
-                      type="number"
-                      step="0.01"
-                      value={price}
-                      onChange={(e) => setPrice(e.target.value)}
-                      placeholder="0.00"
-                    />
-                  </div>
+                  {/* ✅ Price hidden unless ENABLE_PRICE is true */}
+                  {ENABLE_PRICE && (
+                    <div className="form-field">
+                      <label className="form-label">Price</label>
+                      <input
+                        className="input"
+                        type="number"
+                        step="0.01"
+                        value={price}
+                        onChange={(e) => setPrice(e.target.value)}
+                        placeholder="0.00"
+                        min="0"
+                      />
+                    </div>
+                  )}
 
                   <div className="form-field" style={{ gridColumn: "1 / -1" }}>
                     <label className="form-label">PDF file (optional for draft)</label>
