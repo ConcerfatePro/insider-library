@@ -2,11 +2,14 @@
 import os
 import random
 import smtplib
+import time
+from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 from email.message import EmailMessage
+from threading import Lock
+from typing import Callable, Deque, Dict, Optional, Tuple
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -42,6 +45,118 @@ pwd_context = CryptContext(schemes=["sha256_crypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# ---------------- RATE LIMITER ----------------
+# Simple in-memory fixed-window limiter.
+# Good for single-process deployments. For multi-worker / multi-instance, use Redis.
+
+def _parse_int_env(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except Exception:
+        return default
+
+# Defaults are intentionally conservative; tune as needed.
+RL_LOGIN_IP_LIMIT = _parse_int_env("RL_LOGIN_IP_LIMIT", 30)               # 30 login attempts / 5 min / IP
+RL_LOGIN_IP_WINDOW = _parse_int_env("RL_LOGIN_IP_WINDOW", 300)
+
+RL_LOGIN_IP_EMAIL_LIMIT = _parse_int_env("RL_LOGIN_IP_EMAIL_LIMIT", 10)   # 10 attempts / 5 min / IP+email
+RL_LOGIN_IP_EMAIL_WINDOW = _parse_int_env("RL_LOGIN_IP_EMAIL_WINDOW", 300)
+
+RL_SIGNUP_IP_LIMIT = _parse_int_env("RL_SIGNUP_IP_LIMIT", 10)             # 10 signups / 10 min / IP
+RL_SIGNUP_IP_WINDOW = _parse_int_env("RL_SIGNUP_IP_WINDOW", 600)
+
+RL_VERIFY_IP_EMAIL_LIMIT = _parse_int_env("RL_VERIFY_IP_EMAIL_LIMIT", 15) # 15 verify attempts / 10 min / IP+email
+RL_VERIFY_IP_EMAIL_WINDOW = _parse_int_env("RL_VERIFY_IP_EMAIL_WINDOW", 600)
+
+RL_PWD_RESET_REQ_IP_LIMIT = _parse_int_env("RL_PWD_RESET_REQ_IP_LIMIT", 8)      # 8 requests / 15 min / IP
+RL_PWD_RESET_REQ_IP_WINDOW = _parse_int_env("RL_PWD_RESET_REQ_IP_WINDOW", 900)
+
+RL_PWD_RESET_REQ_IP_EMAIL_LIMIT = _parse_int_env("RL_PWD_RESET_REQ_IP_EMAIL_LIMIT", 4)  # 4 / 15 min / IP+email
+RL_PWD_RESET_REQ_IP_EMAIL_WINDOW = _parse_int_env("RL_PWD_RESET_REQ_IP_EMAIL_WINDOW", 900)
+
+RL_PWD_RESET_IP_LIMIT = _parse_int_env("RL_PWD_RESET_IP_LIMIT", 10)       # 10 reset attempts / 15 min / IP
+RL_PWD_RESET_IP_WINDOW = _parse_int_env("RL_PWD_RESET_IP_WINDOW", 900)
+
+
+def get_client_ip(request: Request) -> str:
+    """
+    Best-effort client IP.
+
+    If you're behind Cloudflare, CF-Connecting-IP is reliable.
+    If you're behind another proxy, you may need to adjust what you trust.
+    """
+    # Cloudflare
+    cf = request.headers.get("cf-connecting-ip")
+    if cf:
+        return cf.split(",")[0].strip()
+
+    # Common proxy headers (be careful: can be spoofed if not behind a trusted proxy)
+    x_real = request.headers.get("x-real-ip")
+    if x_real:
+        return x_real.split(",")[0].strip()
+
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+
+    if request.client and request.client.host:
+        return request.client.host
+
+    return "unknown"
+
+
+class InMemoryRateLimiter:
+    def __init__(self) -> None:
+        self._events: Dict[str, Deque[float]] = defaultdict(deque)
+        self._lock = Lock()
+
+    def hit(self, key: str, limit: int, window_seconds: int) -> Tuple[bool, int]:
+        """
+        Returns (allowed, retry_after_seconds).
+        Fixed window using timestamp queue + pruning.
+        """
+        now = time.time()
+        cutoff = now - window_seconds
+
+        with self._lock:
+            q = self._events[key]
+
+            # prune old
+            while q and q[0] <= cutoff:
+                q.popleft()
+
+            if len(q) >= limit:
+                # earliest still-in-window timestamp determines retry-after
+                oldest = q[0]
+                retry_after = int(max(1, (oldest + window_seconds) - now))
+                return False, retry_after
+
+            q.append(now)
+
+            # small cleanup to prevent memory growth
+            if not q:
+                self._events.pop(key, None)
+
+            return True, 0
+
+
+_rate_limiter = InMemoryRateLimiter()
+
+
+def enforce_rate_limit(scope: str, request: Request, key: str, limit: int, window_seconds: int) -> None:
+    allowed, retry_after = _rate_limiter.hit(f"{scope}:{key}", limit, window_seconds)
+    if not allowed:
+        # Retry-After helps clients behave nicely
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests. Please try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
+def _norm_email(email: str) -> str:
+    return (email or "").strip().lower()
 
 
 # ---------------- EMAIL ----------------
@@ -180,7 +295,6 @@ def issue_verification_code(user: models.User, *, enforce_cooldown: bool = True)
     user.verification_code = code
     user.verification_expires_at = now + timedelta(minutes=VERIFICATION_CODE_TTL_MINUTES)
 
-    # Also print to backend console (dev only)
     if ENV == "development":
         print(f"[InsiderLibrary] Verification code for {user.email}: {code}")
 
@@ -242,6 +356,7 @@ def get_current_admin_user(current_user: models.User = Depends(get_current_user)
 def signup(
     user_in: schemas.UserCreate,
     background_tasks: BackgroundTasks,
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """
@@ -249,7 +364,10 @@ def signup(
     - Existing but unverified -> resend code (after cooldown) + update name/password.
     - Existing and verified -> block.
     """
-    existing = get_user_by_email(db, user_in.email)
+    ip = get_client_ip(request)
+    enforce_rate_limit("signup_ip", request, ip, RL_SIGNUP_IP_LIMIT, RL_SIGNUP_IP_WINDOW)
+
+    existing = get_user_by_email(db, _norm_email(user_in.email))
 
     if existing:
         # Verified = no active verification code stored (we clear it after verify)
@@ -274,7 +392,7 @@ def signup(
 
     user = models.User(
         name=user_in.name,
-        email=user_in.email,
+        email=_norm_email(user_in.email),
         hashed_password=get_password_hash(user_in.password),
         is_active=True,
         is_admin=False,
@@ -298,8 +416,18 @@ def signup(
 
 
 @router.post("/verify-signup", response_model=schemas.Token)
-def verify_signup(payload: schemas.VerifySignupIn, db: Session = Depends(get_db)):
-    user = get_user_by_email(db, payload.email)
+def verify_signup(payload: schemas.VerifySignupIn, request: Request, db: Session = Depends(get_db)):
+    ip = get_client_ip(request)
+    email = _norm_email(payload.email)
+    enforce_rate_limit(
+        "verify_ip_email",
+        request,
+        f"{ip}:{email}",
+        RL_VERIFY_IP_EMAIL_LIMIT,
+        RL_VERIFY_IP_EMAIL_WINDOW,
+    )
+
+    user = get_user_by_email(db, email)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -328,12 +456,26 @@ def verify_signup(payload: schemas.VerifySignupIn, db: Session = Depends(get_db)
 
 @router.post("/login", response_model=schemas.Token)
 def login_for_access_token(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):
-    email = form_data.username
+    ip = get_client_ip(request)
+    email = _norm_email(form_data.username)
+
+    # Two layers: per-IP and per-IP+email
+    enforce_rate_limit("login_ip", request, ip, RL_LOGIN_IP_LIMIT, RL_LOGIN_IP_WINDOW)
+    enforce_rate_limit(
+        "login_ip_email",
+        request,
+        f"{ip}:{email}",
+        RL_LOGIN_IP_EMAIL_LIMIT,
+        RL_LOGIN_IP_EMAIL_WINDOW,
+    )
+
     user = authenticate_user(db, email, form_data.password)
     if not user:
+        # Keep error generic to avoid enumeration
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -356,6 +498,7 @@ def read_users_me(current_user: models.User = Depends(get_current_user)):
 def request_password_reset(
     payload: dict,
     background_tasks: BackgroundTasks,
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """
@@ -363,9 +506,21 @@ def request_password_reset(
     If user exists + allowed, email a reset token.
     payload expects: { "email": "..." }
     """
-    email = (payload.get("email") or "").strip().lower()
+    ip = get_client_ip(request)
+    enforce_rate_limit("pwd_reset_req_ip", request, ip, RL_PWD_RESET_REQ_IP_LIMIT, RL_PWD_RESET_REQ_IP_WINDOW)
+
+    email = _norm_email(payload.get("email") or "")
     if not email:
         raise HTTPException(status_code=400, detail="Email is required")
+
+    # Also rate-limit by IP+email to reduce targeted bombing
+    enforce_rate_limit(
+        "pwd_reset_req_ip_email",
+        request,
+        f"{ip}:{email}",
+        RL_PWD_RESET_REQ_IP_EMAIL_LIMIT,
+        RL_PWD_RESET_REQ_IP_EMAIL_WINDOW,
+    )
 
     user = get_user_by_email(db, email)
     if user:
@@ -391,10 +546,13 @@ def request_password_reset(
 
 
 @router.post("/reset-password")
-def reset_password(payload: dict, db: Session = Depends(get_db)):
+def reset_password(payload: dict, request: Request, db: Session = Depends(get_db)):
     """
     payload expects: { "token": "...", "new_password": "..." }
     """
+    ip = get_client_ip(request)
+    enforce_rate_limit("pwd_reset_ip", request, ip, RL_PWD_RESET_IP_LIMIT, RL_PWD_RESET_IP_WINDOW)
+
     token = (payload.get("token") or "").strip()
     new_password = (payload.get("new_password") or "").strip()
 

@@ -2,6 +2,121 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { API_BASE, getMe, signup, verifySignup, login } from "./api";
 
+function EyeIcon({ open = false }) {
+  // open=false => eye (hidden), open=true => eye-off (visible state)
+  // (Naming here is just "open", meaning "show password")
+  return open ? (
+    // Eye-off icon
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M3 3l18 18"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M10.58 10.58A2 2 0 0 0 12 14a2 2 0 0 0 1.42-.58"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M9.9 5.07A10.9 10.9 0 0 1 12 5c7 0 10 7 10 7a18.2 18.2 0 0 1-4.34 5.32"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M6.11 6.11C2.99 8.28 2 12 2 12s3 7 10 7c1.22 0 2.36-.21 3.4-.58"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  ) : (
+    // Eye icon
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function PasswordField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  required = true,
+  inputClassName = "input",
+}) {
+  const [show, setShow] = useState(false);
+
+  return (
+    <div className="form-field">
+      <label className="form-label">{label}</label>
+
+      <div style={{ position: "relative" }}>
+        <input
+          className={inputClassName}
+          type={show ? "text" : "password"}
+          value={value}
+          onChange={onChange}
+          required={required}
+          placeholder={placeholder}
+          style={{ paddingRight: "2.6rem" }}
+        />
+
+        <button
+          type="button"
+          onClick={() => setShow((s) => !s)}
+          aria-label={show ? "Hide password" : "Show password"}
+          style={{
+            position: "absolute",
+            right: "0.6rem",
+            top: "50%",
+            transform: "translateY(-50%)",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: "2rem",
+            height: "2rem",
+            borderRadius: "10px",
+            border: "1px solid rgba(148, 163, 184, 0.18)",
+            background: "rgba(2, 8, 22, 0.35)",
+            color: "rgba(226, 232, 240, 0.9)",
+            cursor: "pointer",
+          }}
+        >
+          <EyeIcon open={show} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function AccountPage() {
   const location = useLocation();
 
@@ -46,10 +161,7 @@ function AccountPage() {
     const data = await res.json().catch(() => null);
 
     if (!res.ok) {
-      const msg =
-        data?.detail ||
-        data?.message ||
-        `Request failed (${res.status})`;
+      const msg = data?.detail || data?.message || `Request failed (${res.status})`;
       const err = new Error(String(msg));
       err.status = res.status;
       throw err;
@@ -365,16 +477,14 @@ function AccountPage() {
                       required
                     />
                   </div>
-                  <div className="form-field">
-                    <label className="form-label">Password</label>
-                    <input
-                      className="input"
-                      type="password"
-                      value={loginPassword}
-                      onChange={(e) => setLoginPassword(e.target.value)}
-                      required
-                    />
-                  </div>
+
+                  <PasswordField
+                    label="Password"
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    required
+                  />
+
                   <div className="form-field" style={{ alignSelf: "flex-end" }}>
                     <button type="submit" className="btn btn-primary">
                       Log in
@@ -458,17 +568,14 @@ function AccountPage() {
                             placeholder="Paste token from your email"
                           />
                         </div>
-                        <div className="form-field" style={{ gridColumn: "1 / -1" }}>
-                          <label className="form-label">New password</label>
-                          <input
-                            className="input"
-                            type="password"
-                            value={resetNewPassword}
-                            onChange={(e) => setResetNewPassword(e.target.value)}
-                            required
-                            placeholder="At least 8 characters"
-                          />
-                        </div>
+
+                        <PasswordField
+                          label="New password"
+                          value={resetNewPassword}
+                          onChange={(e) => setResetNewPassword(e.target.value)}
+                          required
+                          placeholder="At least 8 characters"
+                        />
 
                         <div className="form-field" style={{ alignSelf: "flex-end" }}>
                           <button type="submit" className="btn btn-primary" disabled={resetting}>
@@ -523,16 +630,14 @@ function AccountPage() {
                         required
                       />
                     </div>
-                    <div className="form-field">
-                      <label className="form-label">Password</label>
-                      <input
-                        className="input"
-                        type="password"
-                        value={signupPassword}
-                        onChange={(e) => setSignupPassword(e.target.value)}
-                        required
-                      />
-                    </div>
+
+                    <PasswordField
+                      label="Password"
+                      value={signupPassword}
+                      onChange={(e) => setSignupPassword(e.target.value)}
+                      required
+                    />
+
                     <div className="form-field" style={{ alignSelf: "flex-end" }}>
                       <button type="submit" className="btn btn-primary">
                         Sign up
