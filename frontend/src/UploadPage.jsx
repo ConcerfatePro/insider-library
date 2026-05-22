@@ -1,339 +1,202 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { getMe, createListing, uploadListingFile } from "./api";
+import { getMe, createListing, uploadListingFile, publishListing } from "./api";
+import { CATEGORY_OPTIONS, LEGAL_CONFIRMATION } from "./constants";
 
-const CATEGORY_OPTIONS = [
-  "Medicine",
-  "Finance",
-  "Education",
-  "Technology",
-  "Business",
-  "Science",
-  "Personal Development",
-  "Other",
-];
-
-// ✅ Feature flag: set to true when you want price to show + be used
-const ENABLE_PRICE = false;
+const MAX_MB = 25;
 
 export default function UploadPage() {
   const navigate = useNavigate();
-
-  const [currentUser, setCurrentUser] = useState(null);
+  const [user, setUser] = useState(null);
   const [userLoading, setUserLoading] = useState(true);
-
   const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
+  const [shortDescription, setShortDescription] = useState("");
+  const [longDescription, setLongDescription] = useState("");
   const [category, setCategory] = useState(CATEGORY_OPTIONS[0]);
-
-  // If price isn't enabled, keep it at 0
+  const [tags, setTags] = useState("");
   const [price, setPrice] = useState("0");
-
   const [file, setFile] = useState(null);
-
+  const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
   useEffect(() => {
-    const loadUser = async () => {
-      setUserLoading(true);
-      setError("");
-      try {
-        const me = await getMe();
-        setCurrentUser(me);
-      } catch (e) {
-        console.error(e);
-        setCurrentUser(null);
-      } finally {
-        setUserLoading(false);
-      }
-    };
-
-    loadUser();
+    getMe()
+      .then(setUser)
+      .catch(() => setUser(null))
+      .finally(() => setUserLoading(false));
   }, []);
 
-  const resetForm = () => {
-    setTitle("");
-    setDescription("");
-    setCategory(CATEGORY_OPTIONS[0]);
-    setPrice("0");
-    setFile(null);
-  };
-
-  const listingPayload = () => ({
-    title,
-    description,
+  const payload = (status) => ({
+    title: title.trim(),
+    short_description: shortDescription.trim(),
+    long_description: (longDescription || shortDescription).trim(),
+    description: shortDescription.trim(),
     category,
-    // ✅ When disabled, always send 0
-    price: ENABLE_PRICE ? parseFloat(price) || 0 : 0,
+    tags,
+    price: parseFloat(price) || 0,
+    price_cents: Math.round((parseFloat(price) || 0) * 100),
+    owner_confirmed: confirmed,
+    status,
   });
 
-  const createDraft = async () => {
+  const validate = (needsFile) => {
+    if (!title.trim() || !shortDescription.trim()) {
+      setError("Title and short description are required.");
+      return false;
+    }
+    if (!confirmed) {
+      setError("You must confirm ownership and content rights.");
+      return false;
+    }
+    if (needsFile && !file) {
+      setError("Attach a PDF to publish.");
+      return false;
+    }
+    if (file && file.size > MAX_MB * 1024 * 1024) {
+      setError(`PDF must be under ${MAX_MB} MB.`);
+      return false;
+    }
+    if (file && file.type && file.type !== "application/pdf") {
+      setError("Only PDF files are allowed.");
+      return false;
+    }
+    return true;
+  };
+
+  const saveDraft = async () => {
+    if (!validate(false)) return;
+    setBusy(true);
     setError("");
-    setSuccess("");
-
-    if (!currentUser) {
-      setError("You must be logged in to create a draft.");
-      return;
-    }
-
-    if (!title.trim() || !description.trim()) {
-      setError("Please add a title and description before saving a draft.");
-      return;
-    }
-
     try {
-      setBusy(true);
-      const draft = await createListing(listingPayload());
-
-      resetForm();
-      setSuccess(
-        `Draft created (Listing #${draft.id}). You can attach a PDF later from your dashboard.`
-      );
-      // optional: jump to dashboard
-      // navigate("/dashboard");
+      const draft = await createListing(payload("draft"));
+      if (file) await uploadListingFile(draft.id, file);
+      setSuccess(`Draft saved (#${draft.id}). Publish from My Listings when ready.`);
     } catch (e) {
-      console.error(e);
-      setError(e?.message || "Failed to create draft.");
+      setError(e.message);
     } finally {
       setBusy(false);
     }
   };
 
-  const publishListing = async (e) => {
+  const publish = async (e) => {
     e.preventDefault();
+    if (!validate(true)) return;
+    setBusy(true);
     setError("");
-    setSuccess("");
-
-    if (!currentUser) {
-      setError("You must be logged in to publish a listing.");
-      return;
-    }
-
-    if (!file) {
-      setError("Please attach a PDF file before publishing. (Or use Save draft.)");
-      return;
-    }
-
     try {
-      setBusy(true);
-
-      // 1) Create listing metadata
-      const newListing = await createListing(listingPayload());
-
-      // 2) Upload the PDF to that listing
-      const listingWithFile = await uploadListingFile(newListing.id, file);
-
-      resetForm();
-      setSuccess(`Published "${listingWithFile.title}" with a PDF attached.`);
-
-      // optional: go to dashboard after publish
-      // navigate("/dashboard");
+      const listing = await createListing(payload("draft"));
+      await uploadListingFile(listing.id, file);
+      await publishListing(listing.id);
+      setSuccess(`Published "${title}".`);
+      setTitle("");
+      setShortDescription("");
+      setLongDescription("");
+      setTags("");
+      setFile(null);
+      setConfirmed(false);
     } catch (e) {
-      console.error(e);
-      setError(e?.message || "Failed to publish listing.");
+      setError(e.message);
     } finally {
       setBusy(false);
     }
   };
+
+  if (userLoading) return <p className="loading-line">Checking account…</p>;
+
+  if (!user) {
+    return (
+      <div className="panel">
+        <h1 className="page-title">Sign in to upload</h1>
+        <p className="page-lead">An account is required to submit knowledge packs.</p>
+        <Link to="/account" className="btn btn-primary">
+          Account
+        </Link>
+      </div>
+    );
+  }
 
   return (
-    <div className="page-root">
-      <div className="page-main">
-        {error && (
-          <div className="error-banner" style={{ marginBottom: "0.75rem" }}>
-            {error}
-          </div>
-        )}
-        {success && (
-          <div className="success-banner" style={{ marginBottom: "0.75rem" }}>
-            {success}
-          </div>
-        )}
+    <div className="page fade-in upload-layout">
+      <section className="panel">
+        <p className="page-eyebrow">Submit to archive</p>
+        <h1 className="page-title">Upload a knowledge pack</h1>
+        <p className="page-lead">
+          Add metadata first, attach your PDF, then publish. Drafts can be saved without a file.
+        </p>
+        <ul className="form-help" style={{ paddingLeft: "1.1rem" }}>
+          <li>PDF only, max {MAX_MB} MB</li>
+          <li>Original content you own or have rights to distribute</li>
+          <li>Reports are reviewed by administrators</li>
+        </ul>
+        <p className="form-help">
+          <Link to="/content-policy">Content Policy</Link>
+        </p>
+      </section>
 
-        {userLoading ? (
-          <section className="card">
-            <div className="home-section-label">Upload</div>
-            <h2 className="section-title">Checking your account…</h2>
-            <p className="home-hero-subtitle">
-              Making sure you&apos;re signed in before creating a listing.
-            </p>
-          </section>
-        ) : !currentUser ? (
-          <section className="card">
-            <div className="home-section-label">Upload</div>
-            <h2 className="section-title">Sign in to create a listing</h2>
-            <p className="home-hero-subtitle">
-              You need an Insider Library account to publish new info packs and
-              upload PDFs.
-            </p>
-            <div className="home-hero-actions" style={{ marginTop: "1rem" }}>
-              <Link to="/account" className="btn btn-primary">
-                Go to account
-              </Link>
-              <Link to="/listings" className="btn btn-ghost">
-                Browse listings
-              </Link>
+      <section className="panel">
+        {error && <div className="error-banner">{error}</div>}
+        {success && <div className="success-banner">{success}</div>}
+
+        <form onSubmit={publish}>
+          <div className="form-grid">
+            <div className="form-field" style={{ gridColumn: "1 / -1" }}>
+              <label className="form-label">Title</label>
+              <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} required />
             </div>
-          </section>
-        ) : (
-          <div className="upload-layout">
-            {/* Left: context / tips */}
-            <section className="card">
-              <div className="home-section-label">For creators</div>
-              <h2 className="section-title">Publish a new info pack</h2>
-              <p className="home-hero-subtitle">
-                Create a listing first, then attach a PDF. If you don&apos;t have
-                the final PDF yet, you can save a draft and come back later.
-              </p>
-
-              <ul className="upload-guidelines">
-                <li>Use a descriptive title (e.g. &quot;ICU Quick Reference&quot;).</li>
-                <li>Describe what someone will get in 2–4 sentences.</li>
-                <li>Choose the category that fits best.</li>
-                <li>
-                  <strong>Drafts</strong> are listings without a PDF.
-                </li>
-                <li>
-                  <strong>Published</strong> listings have a PDF attached.
-                </li>
-              </ul>
-
-              <p className="home-hero-subtitle" style={{ marginTop: "0.7rem" }}>
-                Tip: after you save a draft, go to your Dashboard to attach the
-                PDF when you&apos;re ready.
-              </p>
-
-              <div className="home-hero-actions" style={{ marginTop: "1rem" }}>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => navigate("/dashboard")}
-                >
-                  Go to dashboard
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => navigate("/listings")}
-                >
-                  Browse listings
-                </button>
-              </div>
-            </section>
-
-            {/* Right: form */}
-            <section className="card">
-              <div className="home-section-label">Upload</div>
-              <h3 className="section-title">Listing details</h3>
-
-              <form onSubmit={publishListing}>
-                <div className="form-grid">
-                  <div className="form-field">
-                    <label className="form-label">Title</label>
-                    <input
-                      className="input"
-                      type="text"
-                      value={title}
-                      onChange={(e) => setTitle(e.target.value)}
-                      required
-                      placeholder="e.g. Emergency Medicine Cheat Sheet"
-                    />
-                  </div>
-
-                  <div className="form-field">
-                    <label className="form-label">Category</label>
-                    <select
-                      className="select"
-                      value={category}
-                      onChange={(e) => setCategory(e.target.value)}
-                      required
-                    >
-                      {CATEGORY_OPTIONS.map((cat) => (
-                        <option key={cat} value={cat}>
-                          {cat}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="form-field" style={{ gridColumn: "1 / -1" }}>
-                    <label className="form-label">Description</label>
-                    <textarea
-                      className="textarea"
-                      value={description}
-                      onChange={(e) => setDescription(e.target.value)}
-                      required
-                      rows={3}
-                      placeholder="What will someone learn or get from this file?"
-                    />
-                  </div>
-
-                  {/* ✅ Price hidden unless ENABLE_PRICE is true */}
-                  {ENABLE_PRICE && (
-                    <div className="form-field">
-                      <label className="form-label">Price</label>
-                      <input
-                        className="input"
-                        type="number"
-                        step="0.01"
-                        value={price}
-                        onChange={(e) => setPrice(e.target.value)}
-                        placeholder="0.00"
-                        min="0"
-                      />
-                    </div>
-                  )}
-
-                  <div className="form-field" style={{ gridColumn: "1 / -1" }}>
-                    <label className="form-label">PDF file (optional for draft)</label>
-                    <input
-                      className="input"
-                      type="file"
-                      accept="application/pdf"
-                      onChange={(e) =>
-                        setFile(
-                          e.target.files && e.target.files[0]
-                            ? e.target.files[0]
-                            : null
-                        )
-                      }
-                    />
-                    <p className="form-help-text">
-                      To publish, attach a PDF. To create a draft, leave this empty and click
-                      &quot;Save draft&quot;.
-                    </p>
-                  </div>
-
-                  <div
-                    className="form-field"
-                    style={{
-                      alignSelf: "flex-end",
-                      display: "flex",
-                      gap: "0.6rem",
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      onClick={createDraft}
-                      disabled={busy}
-                    >
-                      {busy ? "Working…" : "Save draft"}
-                    </button>
-
-                    <button type="submit" className="btn btn-primary" disabled={busy}>
-                      {busy ? "Publishing…" : "Publish listing"}
-                    </button>
-                  </div>
-                </div>
-              </form>
-            </section>
+            <div className="form-field">
+              <label className="form-label">Category</label>
+              <select className="select" value={category} onChange={(e) => setCategory(e.target.value)}>
+                {CATEGORY_OPTIONS.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-field">
+              <label className="form-label">Tags (comma-separated)</label>
+              <input className="input" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="checklist, icu, finance" />
+            </div>
+            <div className="form-field" style={{ gridColumn: "1 / -1" }}>
+              <label className="form-label">Short summary</label>
+              <textarea className="textarea" rows={2} value={shortDescription} onChange={(e) => setShortDescription(e.target.value)} required />
+            </div>
+            <div className="form-field" style={{ gridColumn: "1 / -1" }}>
+              <label className="form-label">Full description</label>
+              <textarea className="textarea" rows={4} value={longDescription} onChange={(e) => setLongDescription(e.target.value)} />
+            </div>
+            <div className="form-field">
+              <label className="form-label">Price (USD, 0 = free)</label>
+              <input className="input" type="number" min="0" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} />
+            </div>
+            <div className="form-field" style={{ gridColumn: "1 / -1" }}>
+              <label className="form-label">PDF document</label>
+              <input
+                className="input"
+                type="file"
+                accept="application/pdf"
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+              />
+            </div>
+            <div className="form-field" style={{ gridColumn: "1 / -1" }}>
+              <label className="checkbox-row">
+                <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
+                <span>{LEGAL_CONFIRMATION}</span>
+              </label>
+            </div>
+            <div className="form-field" style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+              <button type="button" className="btn btn-ghost" disabled={busy} onClick={saveDraft}>
+                Save draft
+              </button>
+              <button type="submit" className="btn btn-primary" disabled={busy}>
+                {busy ? "Submitting…" : "Publish to archive"}
+              </button>
+            </div>
           </div>
-        )}
-      </div>
+        </form>
+      </section>
     </div>
   );
 }

@@ -6,14 +6,16 @@ import React from "react";
  */
 function AuthPage() {
   return (
-    <section className="card">
-      <h2 className="section-title">Authentication</h2>
-      <p className="section-caption">
+    <div className="page fade-in">
+    <section className="panel">
+      <h2 className="section-heading">Authentication</h2>
+      <p className="section-lead">
         This is the dedicated auth page. You can move your existing sign up /
         login / 2FA UI into this component.
       </p>
-      <p>Coming soon 🚧</p>
+      <p>Coming soon</p>
     </section>
+    </div>
   );
 }
 

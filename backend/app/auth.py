@@ -350,6 +350,29 @@ def get_current_admin_user(current_user: models.User = Depends(get_current_user)
     return current_user
 
 
+def get_optional_user(
+    token: str = Depends(OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)),
+    db: Session = Depends(get_db),
+) -> Optional[models.User]:
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if not email:
+            return None
+    except JWTError:
+        return None
+    user = get_user_by_email(db, email)
+    if not user:
+        return None
+    try:
+        ensure_user_can_auth(user)
+    except HTTPException:
+        return None
+    return user
+
+
 # ---------------- ROUTES ----------------
 
 @router.post("/signup", status_code=201)

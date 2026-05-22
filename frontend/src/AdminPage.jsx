@@ -1,251 +1,197 @@
-// frontend/src/AdminPage.jsx
 import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   getMe,
+  getAdminStats,
   getAdminUsers,
   getAdminListings,
+  getAdminReports,
+  resolveReport,
   blacklistUser,
   unblacklistUser,
   adminDeleteListing,
   adminDeleteUser,
-  downloadListingFile, // ✅ add
+  adminRejectListing,
 } from "./api";
 
-const AdminPage = () => {
+export default function AdminPage() {
   const navigate = useNavigate();
-
-  const [currentUser, setCurrentUser] = useState(null);
+  const [user, setUser] = useState(null);
+  const [stats, setStats] = useState(null);
   const [users, setUsers] = useState([]);
   const [listings, setListings] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [reports, setReports] = useState([]);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
 
-  // 🔐 Auth + admin guard
   useEffect(() => {
-    const checkAdmin = async () => {
-      try {
-        const me = await getMe();
-
-        // ❌ not admin → kick to home
+    getMe()
+      .then((me) => {
         if (!me.is_admin) {
           navigate("/", { replace: true });
           return;
         }
-
-        setCurrentUser(me);
-      } catch {
-        // ❌ not logged in → kick to home
-        navigate("/", { replace: true });
-      }
-    };
-
-    checkAdmin();
+        setUser(me);
+        return Promise.all([getAdminStats(), getAdminUsers(), getAdminListings(), getAdminReports("open")]);
+      })
+      .then((data) => {
+        if (data) {
+          setStats(data[0]);
+          setUsers(data[1]);
+          setListings(data[2]);
+          setReports(data[3]);
+        }
+      })
+      .catch(() => navigate("/", { replace: true }))
+      .finally(() => setLoading(false));
   }, [navigate]);
 
-  const loadAdminData = async () => {
+  const reloadReports = () =>
+    getAdminReports("open").then(setReports).catch((e) => setError(e.message));
+
+  const handleResolve = async (id, status, archive) => {
     try {
-      setLoading(true);
-      setError("");
-      const [u, ls] = await Promise.all([getAdminUsers(), getAdminListings()]);
-      setUsers(u);
+      await resolveReport(id, { status, admin_notes: "", archive_listing: archive });
+      await reloadReports();
+      const ls = await getAdminListings();
       setListings(ls);
     } catch (e) {
-      console.error(e);
-      setError("Failed to load admin data");
-    } finally {
-      setLoading(false);
+      setError(e.message);
     }
   };
 
-  // Only load admin data once admin is confirmed
-  useEffect(() => {
-    if (currentUser?.is_admin) {
-      loadAdminData();
-    }
-  }, [currentUser]);
-
-  const handleBlacklistUser = async (userId) => {
-    try {
-      setError("");
-      await blacklistUser(userId);
-      await loadAdminData();
-    } catch {
-      setError("Failed to blacklist user");
-    }
-  };
-
-  const handleUnblacklistUser = async (userId) => {
-    try {
-      setError("");
-      await unblacklistUser(userId);
-      await loadAdminData();
-    } catch {
-      setError("Failed to unblacklist user");
-    }
-  };
-
-  const handleDeleteUser = async (userId) => {
-    const confirmed = window.confirm(
-      "Are you sure you want to permanently delete this user? This cannot be undone."
-    );
-    if (!confirmed) return;
-
-    try {
-      setError("");
-      await adminDeleteUser(userId);
-      await loadAdminData();
-    } catch {
-      setError("Failed to delete user");
-    }
-  };
-
-  const handleDeleteListing = async (listingId) => {
-    const confirmed = window.confirm(
-      "Delete this listing permanently? This cannot be undone."
-    );
-    if (!confirmed) return;
-
-    try {
-      setError("");
-      await adminDeleteListing(listingId);
-      await loadAdminData();
-    } catch {
-      setError("Failed to delete listing");
-    }
-  };
-
-  const handleDownload = async (listingId) => {
-    try {
-      setError("");
-      await downloadListingFile(listingId);
-    } catch (e) {
-      console.error(e);
-      setError(e?.message || "Failed to download file");
-    }
-  };
-
-  // While checking auth, render nothing (prevents flicker)
-  if (!currentUser) {
-    return null;
-  }
+  if (!user) return null;
+  if (loading) return <p className="loading-line">Loading admin panel…</p>;
 
   return (
-    <div className="page-root">
-      <div className="page-inner">
-        <div className="page-header">
-          <div>
-            <div className="page-tag">Internal · Admin</div>
-            <h1 className="page-title">Admin control panel</h1>
-            <p className="page-subtitle">
-              Manage users, blacklist / unblacklist accounts, and clean up listings.
-            </p>
-          </div>
+    <div className="page fade-in">
+      <p className="page-eyebrow">Internal · Admin</p>
+      <h1 className="page-title">Control panel</h1>
+      {error && <div className="error-banner">{error}</div>}
+
+      {stats && (
+        <div className="admin-stat-bar">
+          <span>
+            Users: <strong>{stats.users}</strong>
+          </span>
+          <span>
+            Listings: <strong>{stats.listings}</strong> ({stats.published_listings} published)
+          </span>
+          <span>
+            Open reports: <strong>{stats.open_reports}</strong>
+          </span>
+          <span>
+            Downloads: <strong>{stats.downloads}</strong>
+          </span>
         </div>
+      )}
 
-        {error && <div className="error-banner">{error}</div>}
+      <div className="admin-grid">
+        <section className="panel">
+          <h2 className="section-heading">Open reports</h2>
+          {reports.length === 0 ? (
+            <p className="form-help">No open reports.</p>
+          ) : (
+            reports.map((r) => (
+              <div key={r.id} className="archive-row" style={{ flexDirection: "column", alignItems: "stretch" }}>
+                <div>
+                  <strong>{r.reason}</strong> —{" "}
+                  <Link to={`/pack/${r.listing_id}`}>{r.listing_title || `#${r.listing_id}`}</Link>
+                </div>
+                <p className="form-help">{r.details || "No details"}</p>
+                <p className="form-help">From: {r.reporter_email || "anonymous"}</p>
+                <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleResolve(r.id, "dismissed", false)}>
+                    Dismiss
+                  </button>
+                  <button type="button" className="btn btn-danger btn-sm" onClick={() => handleResolve(r.id, "resolved", true)}>
+                    Resolve & reject listing
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </section>
 
-        {loading ? (
-          <p style={{ color: "#e5e7eb" }}>Loading…</p>
-        ) : (
-          <div className="home-grid">
-            {/* USERS */}
-            <section className="home-card" style={{ gridArea: "hero" }}>
-              <h2 className="home-card-title">Users</h2>
-              <ul className="listings-list">
-                {users.map((u) => (
-                  <li key={u.id} className="listing-card">
-                    <div className="listing-title">
-                      {u.name} <span className="listing-meta">#{u.id}</span>
-                    </div>
-                    <div className="listing-meta">
-                      {u.email} · {u.is_admin ? "Admin" : "User"}
-                      {u.is_blacklisted && " · Blacklisted"}
-                    </div>
-
+        <section className="panel">
+          <h2 className="section-heading">Users</h2>
+          <table className="data-table">
+            <tbody>
+              {users.map((u) => (
+                <tr key={u.id}>
+                  <td>
+                    {u.name} <span className="form-help">#{u.id}</span>
+                  </td>
+                  <td>{u.email}</td>
+                  <td>
                     {!u.is_admin && (
-                      <div
-                        style={{
-                          marginTop: "0.4rem",
-                          display: "flex",
-                          gap: "0.4rem",
-                          flexWrap: "wrap",
-                        }}
-                      >
+                      <>
                         {!u.is_blacklisted ? (
-                          <button
-                            className="btn btn-ghost"
-                            onClick={() => handleBlacklistUser(u.id)}
-                          >
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => blacklistUser(u.id).then(() => getAdminUsers().then(setUsers))}>
                             Blacklist
                           </button>
                         ) : (
-                          <button
-                            className="btn btn-ghost"
-                            onClick={() => handleUnblacklistUser(u.id)}
-                          >
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => unblacklistUser(u.id).then(() => getAdminUsers().then(setUsers))}>
                             Unblacklist
                           </button>
                         )}
                         <button
-                          className="btn btn-primary"
-                          onClick={() => handleDeleteUser(u.id)}
+                          type="button"
+                          className="btn btn-danger btn-sm"
+                          onClick={() => {
+                            if (window.confirm("Delete user?")) adminDeleteUser(u.id).then(() => getAdminUsers().then(setUsers));
+                          }}
                         >
                           Delete
                         </button>
-                      </div>
+                      </>
                     )}
-                  </li>
-                ))}
-              </ul>
-            </section>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
 
-            {/* LISTINGS */}
-            <section className="home-card" style={{ gridArea: "stats" }}>
-              <h2 className="home-card-title">Listings</h2>
-              <ul className="listings-list">
-                {listings.map((l) => (
-                  <li key={l.id} className="listing-card">
-                    <div className="listing-title">
-                      {l.title} <span className="listing-meta">#{l.id}</span>
-                    </div>
-                    <div className="listing-meta">
-                      {l.category} · {l.file_path ? "PDF" : "No file"}
-                    </div>
-
-                    <div
-                      style={{
-                        marginTop: "0.4rem",
-                        display: "flex",
-                        gap: "0.4rem",
-                        flexWrap: "wrap",
+        <section className="panel" style={{ gridColumn: "1 / -1" }}>
+          <h2 className="section-heading">All listings</h2>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Status</th>
+                <th>Owner</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {listings.map((l) => (
+                <tr key={l.id}>
+                  <td>
+                    <Link to={`/pack/${l.id}`}>{l.title}</Link>
+                  </td>
+                  <td>{l.status}</td>
+                  <td>#{l.owner_id}</td>
+                  <td>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => adminRejectListing(l.id).then(() => getAdminListings().then(setListings))}>
+                      Reject
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-danger btn-sm"
+                      onClick={() => {
+                        if (window.confirm("Delete listing?")) adminDeleteListing(l.id).then(() => getAdminListings().then(setListings));
                       }}
                     >
-                      {l.file_path && (
-                        <button
-                          className="btn btn-ghost"
-                          onClick={() => handleDownload(l.id)}
-                        >
-                          Download PDF
-                        </button>
-                      )}
-
-                      <button
-                        className="btn btn-primary"
-                        onClick={() => handleDeleteListing(l.id)}
-                      >
-                        Delete listing
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          </div>
-        )}
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
       </div>
     </div>
   );
-};
-
-export default AdminPage;
+}

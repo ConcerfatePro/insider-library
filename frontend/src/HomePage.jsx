@@ -1,307 +1,322 @@
-// frontend/src/HomePage.jsx
-import React from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { fetchListings, fetchCategories } from "./api";
+import { CATEGORY_OPTIONS } from "./constants";
 
-const HomePage = ({ currentUser }) => {
+const PACK_TYPES = [
+  {
+    title: "Quick guides",
+    desc: "Short PDFs you can read in one sitting — procedures, workflows, and how-tos.",
+  },
+  {
+    title: "Checklists",
+    desc: "Printable or on-screen lists for repeatable tasks and quality checks.",
+  },
+  {
+    title: "Playbooks",
+    desc: "Step-by-step reference for teams and solo operators who need consistency.",
+  },
+  {
+    title: "Reference sheets",
+    desc: "Dense tables, formulas, and crib notes meant to stay open beside your work.",
+  },
+];
+
+const QUICK_PATHS = [
+  { label: "Browse the archive", to: "/browse", desc: "Search all published packs" },
+  { label: "My Library", to: "/library", desc: "Re-download what you own", auth: true },
+  { label: "Upload a pack", to: "/upload", desc: "Share original PDFs you have rights to", auth: true },
+  { label: "Creator dashboard", to: "/dashboard", desc: "Stats, drafts, and activity", auth: true },
+];
+
+export default function HomePage({ currentUser }) {
   const navigate = useNavigate();
-  const isLoggedIn = !!currentUser;
+  const [featured, setFeatured] = useState([]);
+  const [popular, setPopular] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [search, setSearch] = useState("");
 
-  const firstName =
-    currentUser?.name?.split(" ")[0] ||
-    currentUser?.name ||
-    currentUser?.email ||
-    "";
+  useEffect(() => {
+    fetchListings({ sort: "newest" })
+      .then((data) => {
+        const list = data || [];
+        setFeatured(list.slice(0, 6));
+      })
+      .catch(() => setFeatured([]));
+
+    fetchListings({ sort: "downloads" })
+      .then((data) => setPopular((data || []).slice(0, 4)))
+      .catch(() => setPopular([]));
+
+    fetchCategories()
+      .then((cats) => setCategories(cats?.length ? cats : CATEGORY_OPTIONS))
+      .catch(() => setCategories(CATEGORY_OPTIONS));
+  }, []);
+
+  const onSearch = (e) => {
+    e.preventDefault();
+    const q = search.trim();
+    navigate(q ? `/browse?q=${encodeURIComponent(q)}` : "/browse");
+  };
+
+  const displayCategories = categories.slice(0, 8);
 
   return (
-    <div className="home-page">
-      <div className="home-inner">
-        {/* Grid = Rubik-style layout */}
-        <div className="home-grid">
-          {/* HERO: spans two columns */}
-          <section className="home-card home-hero">
-            <div className="home-hero-tag">
-              {isLoggedIn
-                ? `Signed in as ${firstName}`
-                : "INSIDER LIBRARY"}
-            </div>
-
-            <h1 className="home-hero-title">
-              {isLoggedIn ? (
-                <>
-                  Welcome back, <span>{firstName || "creator"}</span>.
-                </>
-              ) : (
-                <>
-                  A quiet place for <span>sharp information</span>.
-                </>
-              )}
+    <div className="fade-in home-page">
+      <section className="home-hero-band">
+        <div className="hero-split">
+          <div className="hero-copy">
+            <p className="page-eyebrow">The Insider · Knowledge Library</p>
+            <h1 className="page-title">
+              Practical knowledge, organized like a private archive.
             </h1>
-
-            <p className="home-hero-text">
-              {isLoggedIn
-                ? "Pick a direction: update your packs, check your activity, or explore new PDFs from other creators."
-                : "Upload compact PDFs, price them fairly, and let people discover the insider knowledge you’ve already worked hard to learn."}
+            <p className="page-lead">
+              Browse compact guides, checklists, playbooks, and reference documents
+              built for people who want useful information without noise.
             </p>
-
-            <div className="home-hero-actions">
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => navigate("/dashboard")}
-              >
-                {isLoggedIn ? "Open your dashboard" : "Go to dashboard"}
+            <form className="hero-search" onSubmit={onSearch}>
+              <input
+                className="input"
+                type="search"
+                placeholder="Search the archive…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              <button type="submit" className="btn btn-primary">
+                Search
               </button>
-
-              {isLoggedIn ? (
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => navigate("/upload")}
-                >
-                  Upload a new pack
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => navigate("/listings")}
-                >
-                  Browse listings
-                </button>
-              )}
+            </form>
+            <div className="hero-actions">
+              <Link to="/browse" className="btn btn-primary">
+                Browse Library
+              </Link>
+              <Link to="/upload" className="btn btn-ghost">
+                Upload a Knowledge Pack
+              </Link>
             </div>
-          </section>
-
-          {/* STATS / TRUST */}
-          <section className="home-card home-stats">
-            <h2 className="home-card-title">
-              {isLoggedIn ? "Your library at a glance" : "Why a library?"}
-            </h2>
-
-            <p className="home-card-text">
-              {isLoggedIn
-                ? "This space, together with your dashboard, becomes the quick overview of how your information library is doing."
-                : "Instead of endless feeds, Insider Library is built like a stack of well-labeled shelves. You come in, find the one thing you need, and get back to real life."}
+          </div>
+          <div className="hero-archive-preview">
+            <p className="preview-label">Archive index · recent</p>
+            <p className="preview-intro">
+              Curated PDF guides and reference packs from independent creators.
             </p>
+            {featured.length === 0 ? (
+              <div className="preview-row preview-row-empty">
+                <span className="preview-row-title">No published packs yet</span>
+                <span className="preview-row-meta">Be the first to upload</span>
+              </div>
+            ) : (
+              featured.slice(0, 5).map((l) => (
+                <div key={l.id} className="preview-row">
+                  <Link to={`/pack/${l.id}`} className="preview-row-title">
+                    {l.title}
+                  </Link>
+                  <span className="preview-row-meta">{l.category}</span>
+                  {l.short_description && (
+                    <span className="preview-row-desc">{l.short_description}</span>
+                  )}
+                </div>
+              ))
+            )}
+            <Link to="/browse" className="preview-footer-link">
+              View full archive →
+            </Link>
+          </div>
+        </div>
+      </section>
 
-            <div className="home-stats-row">
-              <div>
-                <div className="home-stat-label">
-                  {isLoggedIn ? "Your role" : "Designed for"}
-                </div>
-                <div className="home-stat-value">
-                  {isLoggedIn ? "Creator & learner" : "Clarity"}
-                </div>
-              </div>
-              <div>
-                <div className="home-stat-label">Noise level</div>
-                <div className="home-stat-value">
-                  {isLoggedIn ? "Still quiet" : "Low"}
-                </div>
-              </div>
+      <section className="home-strip">
+        <div className="strip-cell">
+          <span className="strip-label">Format</span>
+          <span className="strip-value">PDF knowledge packs</span>
+        </div>
+        <div className="strip-cell">
+          <span className="strip-label">Reviews</span>
+          <span className="strip-value">Verified after download</span>
+        </div>
+        <div className="strip-cell">
+          <span className="strip-label">Access</span>
+          <span className="strip-value">Free & paid listings</span>
+        </div>
+        <div className="strip-cell">
+          <span className="strip-label">Creators</span>
+          <span className="strip-value">Original content only</span>
+        </div>
+      </section>
+
+      <div className="home-grid">
+        <section className="home-grid-full">
+          <h2 className="section-heading">What you&apos;ll find</h2>
+          <p className="section-lead">
+            A focused catalog — not a feed. Each listing is a single, purposeful document.
+          </p>
+          <div className="info-grid">
+            {PACK_TYPES.map((item) => (
+              <article key={item.title} className="info-card">
+                <h3 className="info-card-title">{item.title}</h3>
+                <p className="info-card-desc">{item.desc}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="panel">
+          <h2 className="section-heading">Browse by category</h2>
+          <div className="category-grid">
+            {displayCategories.map((c) => (
+              <Link
+                key={c}
+                to={`/browse?category=${encodeURIComponent(c)}`}
+                className="category-card"
+              >
+                <span className="category-card-name">{c}</span>
+                <span className="category-card-arrow">→</span>
+              </Link>
+            ))}
+          </div>
+          <Link to="/browse" className="text-link" style={{ marginTop: "0.85rem", display: "inline-block" }}>
+            View all categories
+          </Link>
+        </section>
+
+        {featured.length > 0 && (
+          <section className="panel">
+            <div className="section-header-row">
+              <h2 className="section-heading">Recently added</h2>
+              <Link to="/browse" className="text-link">
+                See all →
+              </Link>
+            </div>
+            <div className="listing-mini-grid">
+              {featured.map((l) => (
+                <Link key={l.id} to={`/pack/${l.id}`} className="listing-mini-card">
+                  <span className="listing-mini-category">{l.category}</span>
+                  <span className="listing-mini-title">{l.title}</span>
+                  <p className="listing-mini-desc">
+                    {l.short_description || l.description}
+                  </p>
+                  <span className="listing-mini-meta">
+                    {l.is_free ? "Free" : `$${(l.price_cents / 100).toFixed(2)}`}
+                    {l.average_rating != null && ` · ${l.average_rating} ★`}
+                  </span>
+                </Link>
+              ))}
             </div>
           </section>
+        )}
 
-          {/* FOR LEARNERS */}
-          <section className="home-card home-learners">
-            <h2 className="home-card-title">
-              {isLoggedIn ? "Learn from others" : "For learners"}
-            </h2>
-
-            {isLoggedIn ? (
-              <>
-                <ul className="home-list">
-                  <li>Browse recent listings to see what others are sharing.</li>
-                  <li>Save ideas for future packs by seeing what resonates.</li>
-                  <li>Leave honest reviews to support good work.</li>
-                </ul>
-                <button
-                  type="button"
-                  className="home-link-button"
-                  onClick={() => navigate("/listings")}
-                >
-                  Explore the library →
-                </button>
-              </>
-            ) : (
-              <>
-                <ul className="home-list">
-                  <li>Find focused PDFs instead of huge textbooks.</li>
-                  <li>Sort by category, rating, and recency.</li>
-                  <li>Leave honest reviews to help others.</li>
-                </ul>
-                <button
-                  type="button"
-                  className="home-link-button"
-                  onClick={() => navigate("/listings")}
-                >
-                  Start browsing →
-                </button>
-              </>
-            )}
+        {popular.length > 0 && (
+          <section className="panel">
+            <div className="section-header-row">
+              <h2 className="section-heading">Most downloaded</h2>
+              <Link to="/browse?sort=downloads" className="text-link">
+                Browse by downloads →
+              </Link>
+            </div>
+            <ul className="ranked-list">
+              {popular.map((l, i) => (
+                <li key={l.id}>
+                  <span className="ranked-num">{i + 1}</span>
+                  <div className="ranked-body">
+                    <Link to={`/pack/${l.id}`} className="ranked-title">
+                      {l.title}
+                    </Link>
+                    <span className="ranked-meta">
+                      {l.category} · {l.download_count || 0} downloads
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
           </section>
+        )}
 
-          {/* FOR CREATORS */}
-          <section className="home-card home-creators">
-            <h2 className="home-card-title">
-              {isLoggedIn ? "Build your shelf" : "For creators"}
-            </h2>
-
-            {isLoggedIn ? (
-              <>
-                <ul className="home-list">
-                  <li>Turn your notes, checklists, and slides into packs.</li>
-                  <li>Keep your uploads organized by category and purpose.</li>
-                  <li>Refine over time based on feedback and reviews.</li>
-                </ul>
-                <button
-                  type="button"
-                  className="home-link-button"
-                  onClick={() => navigate("/upload")}
-                >
-                  Go to upload →
-                </button>
-              </>
-            ) : (
-              <>
-                <ul className="home-list">
-                  <li>Turn notes and checklists into proper packs.</li>
-                  <li>Attach a PDF and publish in a few clicks.</li>
-                  <li>Keep control of pricing and updates.</li>
-                </ul>
-                <button
-                  type="button"
-                  className="home-link-button"
-                  onClick={() => navigate("/upload")}
-                >
-                  Publish a pack →
-                </button>
-              </>
+        <section className="panel">
+          <h2 className="section-heading">Quick paths</h2>
+          <div className="quick-path-grid">
+            {QUICK_PATHS.filter((p) => !p.auth || currentUser).map((p) => (
+              <Link key={p.to} to={p.to} className="quick-path-card">
+                <span className="quick-path-label">{p.label}</span>
+                <span className="quick-path-desc">{p.desc}</span>
+              </Link>
+            ))}
+            {!currentUser && (
+              <Link to="/account" className="quick-path-card quick-path-card-accent">
+                <span className="quick-path-label">Create account</span>
+                <span className="quick-path-desc">Sign in to download, library, and upload</span>
+              </Link>
             )}
-          </section>
+          </div>
+        </section>
 
-          {/* HOW IT WORKS */}
-          <section className="home-card home-how">
-            <h2 className="home-card-title">
-              {isLoggedIn ? "Next steps for you" : "How it works"}
-            </h2>
-
-            <ol className="home-steps">
+        <div className="home-two-col">
+          <section className="panel">
+            <h2 className="section-heading">How it works</h2>
+            <ol className="steps-list">
               <li>
-                <span className="step-dot">1</span>
+                <span className="step-num">1</span>
                 <div>
-                  <div className="step-label">
-                    {isLoggedIn ? "Check your dashboard" : "Create an account"}
-                  </div>
-                  <div className="step-text">
-                    {isLoggedIn
-                      ? "Glance over your overview tiles and see what needs attention."
-                      : "Sign up once, verify with a 6-digit code, and you're in."}
-                  </div>
+                  <strong>Browse focused knowledge packs</strong>
+                  <p className="form-help">Filter by category, price, and rating.</p>
                 </div>
               </li>
               <li>
-                <span className="step-dot">2</span>
+                <span className="step-num">2</span>
                 <div>
-                  <div className="step-label">
-                    {isLoggedIn ? "Upload or refine" : "Upload a PDF"}
-                  </div>
-                  <div className="step-text">
-                    {isLoggedIn
-                      ? "Add a new pack or clean up the description of an existing one."
-                      : "Give it a clear title, category, and short description."}
-                  </div>
+                  <strong>Download or purchase</strong>
+                  <p className="form-help">Free packs download when you&apos;re signed in.</p>
                 </div>
               </li>
               <li>
-                <span className="step-dot">3</span>
+                <span className="step-num">3</span>
                 <div>
-                  <div className="step-label">
-                    {isLoggedIn ? "Share selectively" : "Share the link"}
-                  </div>
-                  <div className="step-text">
-                    {isLoggedIn
-                      ? "Share your links with people who will actually use them, not everyone."
-                      : "Your buyers download directly from Insider Library."}
-                  </div>
+                  <strong>Keep them in your library</strong>
+                  <p className="form-help">Re-download anytime from My Library.</p>
+                </div>
+              </li>
+              <li>
+                <span className="step-num">4</span>
+                <div>
+                  <strong>Review only after access</strong>
+                  <p className="form-help">Verified reviews protect the community.</p>
                 </div>
               </li>
             </ol>
           </section>
 
-          {/* START HERE */}
-          <section className="home-card home-start">
-            <h2 className="home-card-title">
-              {isLoggedIn ? "Quick links" : "New here?"}
-            </h2>
-
-            <p className="home-card-text">
-              {isLoggedIn
-                ? "Jump straight to the parts of Insider Library that help you ship more and think less about the admin."
-                : "If you're just browsing, explore public listings. If you're ready to publish, head straight to your dashboard."}
+          <section className="panel">
+            <h2 className="section-heading">For creators</h2>
+            <p className="section-lead">
+              Upload original knowledge packs — guides, checklists, and reference
+              documents you have rights to share.
             </p>
-
-            <div className="home-start-actions">
-              {isLoggedIn ? (
-                <>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={() => navigate("/account")}
-                  >
-                    Account settings
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    onClick={() => navigate("/dashboard")}
-                  >
-                    Open dashboard
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={() => navigate("/account")}
-                  >
-                    Create account
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    onClick={() => navigate("/account")}
-                  >
-                    Log in
-                  </button>
-                </>
-              )}
-            </div>
-          </section>
-
-          {/* LIBRARY VIBE / FOOTER TILE */}
-          <section className="home-card home-vibe">
-            <h2 className="home-card-title">
-              {isLoggedIn
-                ? "Your corner of the night library"
-                : "Built like a night library"}
-            </h2>
-            <p className="home-card-text">
-              {isLoggedIn
-                ? "As you add more packs, this place should feel like a small, organized wing of the library that only you fully understand."
-                : "Dark, quiet, and organized. No pop-ups, no autoplay. Just shelves of tightly-edited PDFs waiting for the right person to pull them off the stack."}
-            </p>
-            <p className="home-card-text home-card-text-sub">
-              {isLoggedIn
-                ? "Over time, the home and dashboard views can surface your most-used categories, best-rated packs, and gentle reminders to tidy older uploads."
-                : "As Insider Library grows, this page will surface featured topics, trusted creators, and staff picks."}
-            </p>
+            <ul className="bullet-list">
+              <li>Save drafts before attaching a PDF</li>
+              <li>Set price or publish free</li>
+              <li>Track downloads and verified reviews</li>
+              <li>Publish, unpublish, or archive anytime</li>
+            </ul>
+            <Link to="/upload" className="btn btn-primary" style={{ marginTop: "1rem" }}>
+              Submit to the archive
+            </Link>
           </section>
         </div>
+
+        <section className="panel panel-slim home-trust-row">
+          <div>
+            <h2 className="section-heading">Trust & safety</h2>
+            <p className="form-help">
+              Original content only. Report abuse on any listing. No stolen, illegal,
+              or harmful material.
+            </p>
+          </div>
+          <div className="trust-links">
+            <Link to="/content-policy">Content Policy</Link>
+            <Link to="/terms">Terms</Link>
+            <Link to="/privacy">Privacy</Link>
+          </div>
+        </section>
       </div>
     </div>
   );
-};
-
-export default HomePage;
+}

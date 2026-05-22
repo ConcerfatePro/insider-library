@@ -375,8 +375,7 @@ function AccountPage() {
 
   // ---------- render ----------
   return (
-    <div className="page-root">
-      <div className="page-main">
+    <div className="page fade-in">
         {error && (
           <div className="error-banner" style={{ marginBottom: "0.75rem" }}>
             {error}
@@ -389,79 +388,104 @@ function AccountPage() {
         )}
 
         {loading ? (
-          <section className="card">
-            <div className="home-section-label">Account</div>
-            <h2 className="section-title">Loading your account…</h2>
-            <p className="home-hero-subtitle">
+          <section className="panel">
+            <p className="page-eyebrow">Account</p>
+            <h1 className="page-title">Loading your account…</h1>
+            <p className="page-lead">
               Checking your authentication status with Insider Library.
             </p>
           </section>
         ) : currentUser ? (
-          // ================= LOGGED IN VIEW =================
-          <div className="account-layout">
-            <section className="card">
-              <div className="home-section-label">Account</div>
-              <h2 className="section-title">Your Insider Library account</h2>
-              <p className="home-hero-subtitle">
-                This is your identity inside the library. Your name and email help
-                buyers know who created each info pack.
+          <div className="page-stack">
+            <header className="page-header">
+              <p className="page-eyebrow">Account</p>
+              <h1 className="page-title">Your Insider Library account</h1>
+              <p className="page-lead">
+                Your identity in the archive. Name and email appear on packs you publish.
               </p>
+            </header>
 
-              <div className="account-info-grid">
-                <div className="account-info-row">
-                  <div className="account-label">Name</div>
-                  <div className="account-value">{currentUser.name || "—"}</div>
-                </div>
-                <div className="account-info-row">
-                  <div className="account-label">Email</div>
-                  <div className="account-value">{currentUser.email}</div>
-                </div>
-                <div className="account-info-row">
-                  <div className="account-label">Role</div>
-                  <div className="account-value">
-                    {currentUser.is_admin ? "Admin" : "User"}
+            <div className="account-layout">
+              <section className="panel">
+                <h2 className="section-heading">Profile</h2>
+                <div className="account-info-grid">
+                  <div className="account-info-row">
+                    <div className="account-label">Name</div>
+                    <div className="account-value">{currentUser.name || "—"}</div>
+                  </div>
+                  <div className="account-info-row">
+                    <div className="account-label">Email</div>
+                    <div className="account-value">{currentUser.email}</div>
+                  </div>
+                  <div className="account-info-row">
+                    <div className="account-label">Role</div>
+                    <div className="account-value">
+                      {currentUser.is_admin ? "Admin" : "User"}
+                    </div>
+                  </div>
+                  <div className="account-info-row">
+                    <div className="account-label">Status</div>
+                    <div className="account-value">
+                      {currentUser.is_active ? "Active" : "Inactive"}
+                    </div>
                   </div>
                 </div>
-                <div className="account-info-row">
-                  <div className="account-label">Status</div>
-                  <div className="account-value">
-                    {currentUser.is_active ? "Active" : "Inactive"}
-                  </div>
+
+                <div className="page-actions">
+                  <Link to="/dashboard" className="btn btn-primary">
+                    Go to dashboard
+                  </Link>
+                  <Link to="/browse" className="btn btn-ghost">
+                    Browse library
+                  </Link>
+                  <Link to="/my-listings" className="btn btn-ghost">
+                    My listings
+                  </Link>
                 </div>
-              </div>
+              </section>
 
-              <div className="home-hero-actions" style={{ marginTop: "1rem" }}>
-                <Link to="/dashboard" className="btn btn-primary">
-                  Go to dashboard
+              <section className="panel">
+                <h2 className="section-heading">Security & session</h2>
+                <p className="section-lead" style={{ margin: "0 0 1rem" }}>
+                  You signed up with email verification (6-digit code). Password reset is
+                  available from the login screen when signed out.
+                </p>
+                <div className="page-actions">
+                  <button type="button" className="btn btn-ghost" onClick={handleLogout}>
+                    Log out
+                  </button>
+                </div>
+              </section>
+            </div>
+
+            {currentUser.is_admin ? (
+              <section className="panel admin-callout">
+                <h2 className="section-heading">Admin access</h2>
+                <p className="section-lead" style={{ margin: "0 0 1rem" }}>
+                  Your account has administrator privileges. Open the control panel to
+                  manage users, listings, and reports.
+                </p>
+                <Link to="/internal-admin-8d14c11" className="btn btn-primary">
+                  Open admin panel
                 </Link>
-                <Link to="/listings" className="btn btn-ghost">
-                  Browse listings
-                </Link>
-              </div>
-            </section>
-
-            <section className="card">
-              <div className="home-section-label">Profile & security</div>
-              <h3 className="section-title">Security & session</h3>
-              <p className="home-hero-subtitle">
-                You signed up with email-based verification (6-digit code).
-              </p>
-
-              <div className="home-hero-actions" style={{ marginTop: "1.1rem" }}>
-                <button type="button" className="btn btn-ghost" onClick={handleLogout}>
-                  Log out
-                </button>
-              </div>
-            </section>
+              </section>
+            ) : null}
           </div>
         ) : (
           // ================= LOGGED OUT VIEW =================
-          <div className="account-auth-layout">
-            {/* Login card */}
-            <section className="card">
-              <div className="home-section-label">Log in</div>
-              <h2 className="section-title">Welcome back</h2>
-              <p className="home-hero-subtitle">
+          <>
+            <header className="page-header">
+              <p className="page-eyebrow">Account</p>
+              <h1 className="page-title">Sign in or create an account</h1>
+              <p className="page-lead">
+                Access your library, upload knowledge packs, and leave verified reviews.
+              </p>
+            </header>
+            <div className="account-auth-layout">
+            <section className="panel">
+              <p className="page-eyebrow">Log in</p>
+              <h1 className="section-heading">Welcome back</h1>
+              <p className="section-lead">
                 Sign in to access your dashboard, manage uploads, and track your listings.
               </p>
 
@@ -509,15 +533,7 @@ function AccountPage() {
               </form>
 
               {resetStep !== "off" && (
-                <div
-                  style={{
-                    marginTop: "0.9rem",
-                    padding: "0.85rem",
-                    borderRadius: "12px",
-                    border: "1px solid #22354b",
-                    background: "radial-gradient(circle at top left, #142335 0%, #070f1c 70%)",
-                  }}
-                >
+                <div className="inset-panel">
                   {resetStep === "request" ? (
                     <form onSubmit={handleRequestReset}>
                       <div className="metric-label" style={{ marginBottom: "0.35rem" }}>
@@ -599,11 +615,10 @@ function AccountPage() {
               )}
             </section>
 
-            {/* Signup / verify card */}
-            <section className="card">
-              <div className="home-section-label">Sign up</div>
-              <h2 className="section-title">Create an account</h2>
-              <p className="home-hero-subtitle">
+            <section className="panel">
+              <p className="page-eyebrow">Sign up</p>
+              <h1 className="section-heading">Create an account</h1>
+              <p className="section-lead">
                 New here? Create an Insider Library account to publish info packs and leave reviews.
               </p>
 
@@ -647,7 +662,7 @@ function AccountPage() {
                 </form>
               ) : (
                 <form onSubmit={handleVerifyCode}>
-                  <p className="home-hero-subtitle" style={{ marginBottom: "0.8rem" }}>
+                  <p className="section-lead" style={{ marginBottom: "0.8rem" }}>
                     Enter the 6-digit code sent to <strong>{pendingEmail}</strong>.
                   </p>
 
@@ -705,8 +720,8 @@ function AccountPage() {
               )}
             </section>
           </div>
+          </>
         )}
-      </div>
     </div>
   );
 }
