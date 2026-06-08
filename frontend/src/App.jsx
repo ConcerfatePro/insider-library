@@ -50,7 +50,7 @@ function Footer() {
   return (
     <footer className="site-footer">
       <div className="footer-inner">
-        <span>© Insider Library — focused knowledge, quietly kept.</span>
+        <span>© Insider Library</span>
         <div className="footer-links">
           <Link to="/terms">Terms</Link>
           <Link to="/content-policy">Content Policy</Link>
@@ -78,7 +78,7 @@ function AppShell() {
         <div className="topbar-inner">
           <Link to="/" className="brand-link topbar-brand">
             <div className="brand-mark">
-              <span className="brand-text">Insider Library</span>
+              <span className="brand-text">Insider Library - backend coming soon</span>
               <span className="brand-sub">Archive</span>
             </div>
           </Link>
