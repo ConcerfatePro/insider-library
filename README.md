@@ -1,4 +1,4 @@
-# Insider Library (The Insider) — V2
+# Insider Library
 
 A focused knowledge marketplace for compact, practical PDF guides, checklists, playbooks, and reference documents. The experience is designed like a **quiet premium digital archive** — not a social feed or generic SaaS template.
 
